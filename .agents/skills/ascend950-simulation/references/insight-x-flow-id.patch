@@ -1,0 +1,12 @@
+diff --git a/server/src/modules/timeline/core/parser/EventUtil.cpp b/server/src/modules/timeline/core/parser/EventUtil.cpp
+--- a/server/src/modules/timeline/core/parser/EventUtil.cpp
++++ b/server/src/modules/timeline/core/parser/EventUtil.cpp
+@@ -148,4 +148,8 @@ Trace::Event *EventUtil::ToSimulationSliceEvent(const json_t &json) {
+     event->args = JsonUtil::GetOptionalString(json, "args");
+     event->groupId = JsonUtil::GetString(json, "group_id");
++    // Original sync mnemonics can use X slices without SET/WAIT aliases.
++    // Clear absent IDs because this event object is reused per thread.
++    event->flagId = json.HasMember("id")
++        ? JsonUtil::GetDumpString(json, "id") : "";
+     return event.get();
+ }
