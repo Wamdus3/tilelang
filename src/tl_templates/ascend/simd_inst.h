@@ -786,10 +786,10 @@ __simd_callee__ inline vector_bool update_mask_b32(uint32_t value) {
 template <typename Part>
 __simd_callee__ inline vector_bool ppack(vector_bool src, Part part) {
   vector_bool dst;
-  if constexpr (part == HIGHER) {
-    asc_pack_to_high(dst, src);
+  if (part == HIGHER) {
+    asc_pack_v2(dst, src);
   } else {
-    asc_pack_to_low(dst, src);
+    asc_pack(dst, src);
   }
   return dst;
 }
@@ -797,7 +797,7 @@ __simd_callee__ inline vector_bool ppack(vector_bool src, Part part) {
 template <typename Part>
 __simd_callee__ inline vector_bool punpack(vector_bool src, Part part) {
   vector_bool dst;
-  if constexpr (part == HIGHER) {
+  if (part == HIGHER) {
     asc_unpack_upper(dst, src);
   } else {
     asc_unpack_lower(dst, src);
@@ -1025,15 +1025,15 @@ __simd_callee__ inline void vsts_pack_quarter(vec_t<T> data, __ubuf__ T *base,
   if constexpr (std::is_same<T, int32_t>::value ||
                 std::is_same<T, uint32_t>::value ||
                 std::is_same<T, float>::value) {
-    asc_storealign_pack_quarter(base, data, offset, mask);
+    asc_storealign_pack_v2(base + offset, data, mask);
   } else if constexpr (std::is_same<T, fp8_e4_t>::value ||
                        std::is_same<T, fp8_e5_t>::value ||
                        std::is_same<T, float4_e2m1x2_t>::value ||
                        std::is_same<T, float4_e1m2x2_t>::value ||
                        std::is_same<T, uint8_t>::value ||
                        std::is_same<T, int8_t>::value) {
-    asc_storealign_pack_quarter((__ubuf__ uint32_t *)base, (vector_u32 &)data,
-                                offset, mask);
+    asc_storealign_pack_v2((__ubuf__ uint32_t *)(base + offset),
+                           (vector_u32 &)data, mask);
   }
 }
 
