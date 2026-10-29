@@ -1,0 +1,10 @@
+# Used locally in WSL to build the repository's own wheel; not a server build procedure.
+build
+scikit-build-core==1.1.1
+cmake==4.4.4
+cython==3.3.0
+ninja==1.13.2
+setuptools==79.0.1
+wheel
+auditwheel
+patchelf==0.19.1.0

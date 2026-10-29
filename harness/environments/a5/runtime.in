@@ -1,0 +1,18 @@
+# Linux x86_64 / CPython 3.11 / A5 glibc 2.31 / CANN 9.1.0
+# Root requirements are reconciled against ../../../../pyproject.toml by prepare_local.py.
+apache-tvm-ffi==0.1.12
+torch-c-dlpack-ext==0.1.5
+cloudpickle==3.1.2
+ml-dtypes==0.6.0
+numpy==2.3.5
+psutil==7.2.2
+torch==2.10.0+cpu
+torch-npu==2.10.0.post4
+# torch_npu imports yaml in npu/_memory_viz.py but omits it from Requires-Dist.
+PyYAML==6.0.3
+tqdm==4.70.1
+typing-extensions==4.16.0
+z3-solver==4.15.4.0
+# Harness development, not automatically executed on A5.
+pytest==9.1.1
+ruff==0.14.14
