@@ -1,0 +1,22 @@
+{
+  "task_id": "fft_c2c.complex64.pilot.v1",
+  "upstream_url": "https://github.com/yyttt6/TileOPs/blob/b84f999c9ec5d375bcedb62b44d79863f830924a/src/tileops/manifest/spec/fft.yaml",
+  "upstream_commit": "b84f999c9ec5d375bcedb62b44d79863f830924a",
+  "upstream_spec_sha256": "7abf6cb0badb23288601fe58e2849938a05234237097bbee9f1074dccf5da935",
+  "logical_dtype": "complex64",
+  "physical_abi": "split real/imag float32[B,N]; leading batch axes flattened; unbatched B=1",
+  "transform": "forward negative exponential; last axis; norm=backward (no normalization)",
+  "pilot_limits": {
+    "N_max": 4096,
+    "N_power_of_two": true,
+    "B_times_N_max": 1000000
+  },
+  "excluded": [
+    "complex128",
+    "N>4096",
+    "upstream workloads outside the frozen 8 cases"
+  ],
+  "accuracy_origin": "experiment preset, not an upstream tolerance claim",
+  "epsilon": "legacy TaskSpec placeholder only; never passed to FFT build(B,N)",
+  "device_baseline_status": "source seed only; no NPU correctness or performance claim"
+}

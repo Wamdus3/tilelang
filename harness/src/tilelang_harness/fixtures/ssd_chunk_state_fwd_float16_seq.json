@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "task_id": "ssd_chunk_state_fwd.float16.seq.tileops.v1",
+  "operator": "ssd_chunk_state_fwd",
+  "target": "ascend",
+  "inputs": [
+    {
+      "name": "x",
+      "shape": [
+        "B",
+        "L",
+        "H",
+        "P"
+      ],
+      "dtype": "float16"
+    },
+    {
+      "name": "Bmat",
+      "shape": [
+        "B",
+        "L",
+        "G",
+        "N"
+      ],
+      "dtype": "float16"
+    },
+    {
+      "name": "dt",
+      "shape": [
+        "B",
+        "H",
+        "NC",
+        "Q"
+      ],
+      "dtype": "float32"
+    },
+    {
+      "name": "dA",
+      "shape": [
+        "B",
+        "H",
+        "NC",
+        "Q"
+      ],
+      "dtype": "float32"
+    },
+    {
+      "name": "seq_idx",
+      "shape": [
+        "B",
+        "L"
+      ],
+      "dtype": "int32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "states",
+      "shape": [
+        "B",
+        "NC",
+        "H",
+        "P",
+        "N"
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "w4_fp16_seq",
+      "dimensions": {
+        "B": 1,
+        "L": 4096,
+        "NC": 16,
+        "Q": 256,
+        "H": 48,
+        "P": 64,
+        "G": 1,
+        "N": 128
+      },
+      "seed": 20261030,
+      "pattern": "normal",
+      "weight": 1
+    },
+    {
+      "case_id": "w6_fp16_seq",
+      "dimensions": {
+        "B": 2,
+        "L": 32768,
+        "NC": 128,
+        "Q": 256,
+        "H": 64,
+        "P": 64,
+        "G": 1,
+        "N": 128
+      },
+      "seed": 20261032,
+      "pattern": "normal",
+      "weight": 1
+    }
+  ],
+  "epsilon": 1e-06,
+  "invocation": {
+    "input_mutation": "forbidden",
+    "output_alias": "forbidden",
+    "layout": "c_contiguous",
+    "input_domain": "finite_mixed_ssd",
+    "reference_access": "allowed"
+  },
+  "accuracy": {
+    "rtol": 0.001,
+    "atol": 0.001,
+    "equal_nan": false
+  },
+  "measurement": {
+    "timer": "npu_event",
+    "boundary": "complete_callable",
+    "warmup_ms": 25,
+    "repeat_ms": 100,
+    "independent_runs": 5,
+    "aggregation": "weighted_geomean_speedup",
+    "input_reset": "fresh_inputs_per_run"
+  },
+  "oracle": {
+    "path": "tasks/ssd.py",
+    "entrypoint": "oracle",
+    "sha256": "7410b87cda46a199ef7fd88905e8556081d007816f009e77f8a58d62cc1054eb"
+  },
+  "host_baseline": {
+    "path": "tasks/ssd.py",
+    "entrypoint": "host_baseline",
+    "sha256": "7410b87cda46a199ef7fd88905e8556081d007816f009e77f8a58d62cc1054eb"
+  },
+  "device_baseline": {
+    "path": "baselines/ssd_chunk_state_fwd.py",
+    "entrypoint": "build",
+    "sha256": "122b6805c5ce539b8ee7d22e8ab1abca95ee1a546dce29fb91d208e24c99e4f9"
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "task_id": "fft_c2c.complex128.tileops.v1",
+  "operator": "fft_c2c",
+  "target": "ascend",
+  "inputs": [
+    {
+      "name": "real",
+      "shape": [
+        "B",
+        "N"
+      ],
+      "dtype": "float64"
+    },
+    {
+      "name": "imag",
+      "shape": [
+        "B",
+        "N"
+      ],
+      "dtype": "float64"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out_real",
+      "shape": [
+        "B",
+        "N"
+      ],
+      "dtype": "float64"
+    },
+    {
+      "name": "out_imag",
+      "shape": [
+        "B",
+        "N"
+      ],
+      "dtype": "float64"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "w02_b64_n4096_complex128",
+      "dimensions": {
+        "B": 64,
+        "N": 4096
+      },
+      "seed": 20261025,
+      "pattern": "normal",
+      "weight": 1
+    },
+    {
+      "case_id": "w08_b4_n1048576_complex128",
+      "dimensions": {
+        "B": 4,
+        "N": 1048576
+      },
+      "seed": 20261031,
+      "pattern": "normal",
+      "weight": 1
+    }
+  ],
+  "epsilon": 1e-06,
+  "invocation": {
+    "input_mutation": "forbidden",
+    "output_alias": "forbidden",
+    "layout": "c_contiguous",
+    "input_domain": "finite_float64",
+    "reference_access": "allowed"
+  },
+  "accuracy": {
+    "rtol": 1e-10,
+    "atol": 1e-10,
+    "equal_nan": false
+  },
+  "measurement": {
+    "timer": "npu_event",
+    "boundary": "complete_callable",
+    "warmup_ms": 25,
+    "repeat_ms": 100,
+    "independent_runs": 5,
+    "aggregation": "weighted_geomean_speedup",
+    "input_reset": "fresh_inputs_per_run"
+  },
+  "oracle": {
+    "path": "tasks/oracles.py",
+    "sha256": "7fdfed589338777415a9995925e5cfc13f377d715fb7ffb43f041d788a48aeba",
+    "entrypoint": "fft_c2c"
+  },
+  "host_baseline": {
+    "path": "tasks/host_baselines.py",
+    "sha256": "2e8cf7862e0342c2f1001eb9ae7cc521ee335fc7919ab0ad648968e7afb0b045",
+    "entrypoint": "fft_c2c"
+  },
+  "device_baseline": {
+    "path": "baselines/fft_c2c.py",
+    "sha256": "5040b32d3b67dcac9d7362a4c0d3de1168d9d1ec74ad14f8d59ff01ba8e85762",
+    "entrypoint": "build"
+  }
+}

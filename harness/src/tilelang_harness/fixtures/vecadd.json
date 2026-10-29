@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "task_id": "vecadd.fp32.v1",
+  "operator": "vecadd",
+  "target": "ascend",
+  "inputs": [
+    {
+      "name": "a",
+      "shape": [
+        "N"
+      ],
+      "dtype": "float32"
+    },
+    {
+      "name": "b",
+      "shape": [
+        "N"
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "out",
+      "shape": [
+        "N"
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "n1_normal",
+      "dimensions": {
+        "N": 1
+      },
+      "seed": 20261016,
+      "pattern": "normal",
+      "weight": 1
+    },
+    {
+      "case_id": "n17_zeros",
+      "dimensions": {
+        "N": 17
+      },
+      "seed": 20261017,
+      "pattern": "zeros",
+      "weight": 1
+    },
+    {
+      "case_id": "n255_alternating",
+      "dimensions": {
+        "N": 255
+      },
+      "seed": 20261018,
+      "pattern": "alternating",
+      "weight": 1
+    },
+    {
+      "case_id": "n256_normal",
+      "dimensions": {
+        "N": 256
+      },
+      "seed": 20261019,
+      "pattern": "normal",
+      "weight": 1
+    },
+    {
+      "case_id": "n257_normal",
+      "dimensions": {
+        "N": 257
+      },
+      "seed": 20261020,
+      "pattern": "normal",
+      "weight": 1
+    },
+    {
+      "case_id": "n1025_tiny",
+      "dimensions": {
+        "N": 1025
+      },
+      "seed": 20261021,
+      "pattern": "tiny",
+      "weight": 1
+    },
+    {
+      "case_id": "n4097_large",
+      "dimensions": {
+        "N": 4097
+      },
+      "seed": 20261022,
+      "pattern": "large",
+      "weight": 1
+    }
+  ],
+  "epsilon": 1e-06,
+  "invocation": {
+    "input_mutation": "forbidden",
+    "output_alias": "forbidden",
+    "layout": "c_contiguous",
+    "input_domain": "finite_float32",
+    "reference_access": "allowed"
+  },
+  "accuracy": {
+    "rtol": 2e-05,
+    "atol": 1e-06,
+    "equal_nan": false
+  },
+  "measurement": {
+    "timer": "npu_event",
+    "boundary": "complete_callable",
+    "warmup_ms": 25,
+    "repeat_ms": 100,
+    "independent_runs": 5,
+    "aggregation": "weighted_geomean_speedup",
+    "input_reset": "fresh_inputs_per_run"
+  },
+  "oracle": {
+    "path": "tasks/oracles.py",
+    "sha256": "7fdfed589338777415a9995925e5cfc13f377d715fb7ffb43f041d788a48aeba",
+    "entrypoint": "vecadd"
+  },
+  "host_baseline": {
+    "path": "tasks/host_baselines.py",
+    "sha256": "2e8cf7862e0342c2f1001eb9ae7cc521ee335fc7919ab0ad648968e7afb0b045",
+    "entrypoint": "vecadd"
+  },
+  "device_baseline": {
+    "path": "baselines/vecadd.py",
+    "sha256": "0a37da2d61825e306a1ee29578f7ee2c24bd55f7fbd2ea78809b9ea0efc3a78c",
+    "entrypoint": "build"
+  }
+}

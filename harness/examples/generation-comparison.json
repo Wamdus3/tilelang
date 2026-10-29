@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "name": "ascend-workflow-comparison-demo",
+  "tasks": ["vecadd", "rmsnorm"],
+  "arms": [
+    {
+      "name": "without_skill",
+      "generator": {
+        "kind": "file", "command": [], "model": "configure-model-identity-before-study",
+        "parameters": {"temperature": 0.2}, "timeout_s": 300, "token_reservation": 32768
+      },
+      "skill_links": []
+    },
+    {
+      "name": "with_staged_existing_skill",
+      "generator": {
+        "kind": "file", "command": [], "model": "configure-model-identity-before-study",
+        "parameters": {"temperature": 0.2}, "timeout_s": 300, "token_reservation": 32768
+      },
+      "skill_links": [".agents/skills/tilelang-ascend/SKILL.md"],
+      "skill_workflow": "ascend-kernel-v1"
+    }
+  ],
+  "replicates": 1,
+  "seed": 42,
+  "max_repairs": 1,
+  "evaluation_mode": "lower",
+  "evaluation_timeout_s": 300,
+  "budget": {"generations": 20, "reserved_tokens": 655360, "evaluations": 8, "wall_seconds": 21600}
+}

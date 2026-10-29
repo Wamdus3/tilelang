@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tilelang-harness"
+version = "0.5.0"
+description = "Deterministic campaigns, isolated workers and evidence for TileLang experiments"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+tlh = "tilelang_harness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tilelang_harness = ["fixtures/*.json", "fixtures/*.yaml", "baselines/*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+extend = "../pyproject.toml"
+line-length = 120

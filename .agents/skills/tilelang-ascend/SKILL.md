@@ -24,12 +24,43 @@ documentation and [tilelang-build](../tilelang-build/SKILL.md).
 
 ## Task-specific references
 
+- [Kernel structure and VF selection](references/kernel-structure.md): modular
+  mixed-kernel stages, SIMD for dense UB work, isolated irregular gathers,
+  compact-NZ packing and output-storage reuse. Read when writing or adapting
+  attention and similar Cube/Vector kernels.
+
 - [Scheduling and synchronization](references/synchronization.md): automatic,
   T.Stage performance tuning, buffer ownership and version modes, conditional
   execution, independent AIV roles, conflict hints, and fully manual protocols.
 
 - [Profiling recipes](references/profiling.md): device timing, regression tools,
   generated-source experiments, and operation cycle measurements with npusim.
+
+## Implementation workflow for tiled mixed kernels
+
+When writing or adapting a repeated Cube/Vector tile loop, read the kernel
+structure and scheduling references above before choosing its VF modes, storage
+and scheduling. Use the closest
+repository kernel as a reference for its caller loop and buffer lifetimes as
+well as its arithmetic stages.
+
+1. Map stages to core/PIPE, and separate loop-carried state, invariant inputs
+   and per-tile scratch. Record physical buffer sizes, including padding,
+   conversion scratch, aliases and candidate version counts.
+2. Where transfers and computation can overlap across tiles, start with an
+   automatic `T.Pipelined` candidate and an explicit `num_stages` bound chosen
+   from that budget. Preserve dependencies on recurrent state; leave eligible
+   scratch compiler-managed unless a specific constraint requires otherwise.
+   Do not blanket-annotate scratch as `1` to simplify implementation.
+3. Inspect the lowered schedule, actual versions and allocation footprint.
+   If retaining a serial loop or single-version scratch, give the concrete
+   dependency, ownership, capacity or task-scope reason. Missing hardware
+   limits validation and tuning; it does not by itself justify disabling
+   eligible multibuffering. Follow the pipeline procedure in the scheduling
+   reference, including initialization of every version's read footprint.
+4. Report the chosen tile/pipeline budget, materialized storage and validation
+   level. Separate source lowering, vendor compilation, device correctness
+   and measured performance; lowering alone does not establish a tuned kernel.
 
 For a suspected compiler defect, preserve the smallest failing kernel together
 with its generated source or lowering trace.
@@ -641,6 +672,10 @@ current supported pattern and emitted code before replacing one form with the
 other. If high-level lowering rejects the required pattern, express it with explicit `T.simd.*`
 operations and validate the result.
 
+For mixed Cube/Vector kernels, choose VF mode per stage rather than wrapping
+every high-level loop in SIMT. See [kernel structure and VF selection](references/kernel-structure.md)
+for attention stage macros and the layout/precision contracts of SIMD packing.
+
 ### 8.3 VF Latency Annotation
 
 `T.SimtVF` and `T.SimdVF` accept `latency=` in cycles as scheduling-model input.
@@ -680,6 +715,7 @@ with one matching test per example. Use DeepGEMM for advanced matrix kernels:
 | SIMT and SIMD group-wise FP8 quantization | `example_per_token_cast_to_fp8.py` |
 | MHA / GQA | `flash_attention/example_mha.py` / `flash_attention/example_gqa.py` |
 | Explicit pipeline stages in attention | `flash_attention/example_gqa_manual_schedule.py` |
+| Cube/Vector stage macros and a pipelined caller loop | `flash_attention/core.py` |
 
 Feature regressions live in `testing/ascend/`; do not import application kernels
 into that suite. Use small `T.Tensor` fixtures at the owning compiler boundary;

@@ -1,0 +1,16 @@
+{
+  "task_id": "fft_c2c.complex128.tileops.v1",
+  "logical_dtype": "complex128",
+  "physical_abi": "split float64[B,N]",
+  "builder": "build(B,N,dtype)",
+  "workload_catalog": "fft_c2c.tileops.json",
+  "limits": {
+    "N_max": 1048576,
+    "B_times_N_max": 4194304
+  },
+  "excluded": [
+    "signature shapes not explicitly listed in upstream workloads"
+  ],
+  "hardware": "NOT_RUN",
+  "measurement_baseline": "short-FFT seed only; long-FFT measurement unavailable"
+}

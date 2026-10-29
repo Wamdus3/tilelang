@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "upstream_commit": "b84f999c9ec5d375bcedb62b44d79863f830924a",
+  "upstream_url": "https://github.com/yyttt6/TileOPs/blob/b84f999c9ec5d375bcedb62b44d79863f830924a/src/tileops/manifest/spec/fft.yaml",
+  "upstream_spec_sha256": "7abf6cb0badb23288601fe58e2849938a05234237097bbee9f1074dccf5da935",
+  "transform": "forward negative exponential; last axis; no normalization",
+  "signature_domain": "positive divisors of 2**28; catalog below covers workloads only",
+  "workloads": [
+    {
+      "workload_index": 0,
+      "label": "latency-4k",
+      "original_batch": [],
+      "logical_shape": [
+        4096
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w00_b1_n4096_complex64",
+      "dimensions": {
+        "B": 1,
+        "N": 4096
+      }
+    },
+    {
+      "workload_index": 1,
+      "label": "throughput-4k",
+      "original_batch": [
+        64
+      ],
+      "logical_shape": [
+        64,
+        4096
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w01_b64_n4096_complex64",
+      "dimensions": {
+        "B": 64,
+        "N": 4096
+      }
+    },
+    {
+      "workload_index": 2,
+      "label": "throughput-4k",
+      "original_batch": [
+        64
+      ],
+      "logical_shape": [
+        64,
+        4096
+      ],
+      "logical_dtype": "complex128",
+      "component_dtype": "float64",
+      "task": "fft_c2c_complex128",
+      "case_id": "w02_b64_n4096_complex128",
+      "dimensions": {
+        "B": 64,
+        "N": 4096
+      }
+    },
+    {
+      "workload_index": 3,
+      "label": "longconv-16k",
+      "original_batch": [
+        64
+      ],
+      "logical_shape": [
+        64,
+        16384
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w03_b64_n16384_complex64",
+      "dimensions": {
+        "B": 64,
+        "N": 16384
+      }
+    },
+    {
+      "workload_index": 4,
+      "label": "longconv-64k",
+      "original_batch": [
+        8
+      ],
+      "logical_shape": [
+        8,
+        65536
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w04_b8_n65536_complex64",
+      "dimensions": {
+        "B": 8,
+        "N": 65536
+      }
+    },
+    {
+      "workload_index": 5,
+      "label": "spectrogram-1k",
+      "original_batch": [
+        256
+      ],
+      "logical_shape": [
+        256,
+        1024
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w05_b256_n1024_complex64",
+      "dimensions": {
+        "B": 256,
+        "N": 1024
+      }
+    },
+    {
+      "workload_index": 6,
+      "label": "fnet-512",
+      "original_batch": [
+        4096
+      ],
+      "logical_shape": [
+        4096,
+        512
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w06_b4096_n512_complex64",
+      "dimensions": {
+        "B": 4096,
+        "N": 512
+      }
+    },
+    {
+      "workload_index": 7,
+      "label": "shortconv-64",
+      "original_batch": [
+        65536
+      ],
+      "logical_shape": [
+        65536,
+        64
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w07_b65536_n64_complex64",
+      "dimensions": {
+        "B": 65536,
+        "N": 64
+      }
+    },
+    {
+      "workload_index": 8,
+      "label": "scientific-1m",
+      "original_batch": [
+        4
+      ],
+      "logical_shape": [
+        4,
+        1048576
+      ],
+      "logical_dtype": "complex128",
+      "component_dtype": "float64",
+      "task": "fft_c2c_complex128",
+      "case_id": "w08_b4_n1048576_complex128",
+      "dimensions": {
+        "B": 4,
+        "N": 1048576
+      }
+    },
+    {
+      "workload_index": 9,
+      "label": "spectrogram-1k-b300",
+      "original_batch": [
+        300
+      ],
+      "logical_shape": [
+        300,
+        1024
+      ],
+      "logical_dtype": "complex64",
+      "component_dtype": "float32",
+      "task": "fft_c2c_complex64",
+      "case_id": "w09_b300_n1024_complex64",
+      "dimensions": {
+        "B": 300,
+        "N": 1024
+      }
+    }
+  ],
+  "device_baseline": "short-FFT seed only; long-FFT measurement unavailable",
+  "accuracy_origin": "local experiment presets, not specified by upstream YAML",
+  "coverage": "exact shape/dtype pairs, not their Cartesian product"
+}
