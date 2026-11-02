@@ -1,6 +1,6 @@
 # 架构与模块连接
 
-本文件描述 0.5.0 的实际实现。控制器是确定性状态机，agent 通过数据协议参与；
+本文件描述 0.6.0 的实际实现。控制器是确定性状态机，agent 通过数据协议参与；
 没有新增 Supervisor agent，也没有由 LLM 决定正式评测通过或设备作业权限。
 
 ## 模块和所有权
@@ -11,12 +11,12 @@
 | 候选 | `bundle.py` | 冻结整个 bundle、入口和配置；拒绝路径逃逸及任务参数覆盖 |
 | 实验证据 | `artifacts.py`、`store.py` | CAS 原子写入，SQLite 事务登记状态/事件；JSON 仅为导出视图 |
 | 实验控制 | `experiments.py`、`budget.py` | trial、阶段、修复父子关系、generation/token/evaluation/墙钟预算 |
-| Skill 与生成 | `generation.py`、`skill_workflow.py` | 原文件引用闭包和哈希、小块交付、响应及证据检查 |
+| Skill 与生成 | `generation.py`、`skill_workflow.py` | 原文件引用闭包和哈希、计算 tile/macro/VF 合同、响应及证据检查 |
 | 外部 runtime | `generator_worker.py` | file 或 command 交接；不依赖模型 SDK；命令具有独立 deadline |
 | 作业 | `protocol.py`、`runner.py`、`watchdog.py`、`worker.py` | 严格 JobSpec、Linux session、超时、进程身份及恢复 |
 | 编译 | `compiler.py` | 显式 target/参数、编译环境快照、每 case TIR/ASC 和 BuildID |
 | 验收 | `judge.py`、`device.py`、`evaluation.py`、`state.py` | 独立输出检查、设备租约/配额、测量、四层证据规约 |
-| 命令入口 | `cli.py` | 任务、候选、作业、恢复、重放、生成、Skill 读取和报告 |
+| 命令入口 | `cli.py` | 任务、候选、作业、恢复、重放、生成、Skill 阶段状态和报告 |
 
 实现目录为 [tilelang_harness](../src/tilelang_harness)，任务 fixture 不依赖本地实验目录。
 
@@ -61,8 +61,11 @@ QUEUED → 预留 generation/token → design 请求与证据检查
 阶段进度与历史上下文/响应位于不可变 `workflow_ref`，避免重复启动已释放的模型请求。
 不同阶段有独立目录，前面阶段文件在 `prior/` 中，后两个阶段收到本次 CAS 导出的 per-case 产物。
 
-`skill-status` 返回下一块而非整份上下文。`skill-read` 记录原文件哈希、行范围、原文哈希与交付身份。
-响应确认所有必需交付，逐项引用适用 Skill 与证据。检查既不解析自然语言技术结论，也不证明模型理解。
+`ascend-kernel-v2` 中的分块指计算组织：`T.macro` 划分阶段，PrimFunc 管理存储与 caller tile loop，
+VF 内明确 `T.Parallel` 或显式 SIMD 的映射与尾块。设计/实现均检查 `tile_decomposition`，
+实现阶段需引用候选 Python 源码。`skill-status` 返回当前阶段、计算组织要求及必需检查。
+生成器直接读取适用 Skill，以路径、文件哈希和原文行号引用规则。
+检查既不解析自然语言技术结论，也不证明模型理解或静态验证宏/并行映射的语义。
 失败停在当前 trial，预算允许时创建修复 trial；修复必须重新建立完整链路，不能沿用旧源码审计。
 
 ## 身份和证据

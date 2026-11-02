@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tilelang-harness"
-version = "0.5.0"
+version = "0.6.0"
 description = "Deterministic campaigns, isolated workers and evidence for TileLang experiments"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]

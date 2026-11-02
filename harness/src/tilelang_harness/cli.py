@@ -60,28 +60,18 @@ def main(argv=None) -> int:
         sub.add_argument("--run-dir", type=Path, required=True)
         if name == "experiment-report":
             sub.add_argument("--output", type=Path)
-    skill_read = commands.add_parser(
-        "skill-read", help="deliver one bounded original skill chunk and record provenance"
-    )
-    skill_read.add_argument("--run-dir", type=Path, required=True)
-    skill_read.add_argument("--trial-id", required=True)
-    skill_read.add_argument("--chunk", required=True)
     skill_status = commands.add_parser(
-        "skill-status", help="show the next unread chunk without dumping the whole context"
+        "skill-status", help="show the current kernel-generation stage, checks and source references"
     )
     skill_status.add_argument("--run-dir", type=Path, required=True)
     skill_status.add_argument("--trial-id", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command in ("skill-read", "skill-status"):
+        if args.command == "skill-status":
             from .experiments import Experiment
 
             experiment = Experiment(args.run_dir)
-            payload = (
-                experiment.read_skill(args.trial_id, args.chunk)
-                if args.command == "skill-read"
-                else experiment.skill_status(args.trial_id)
-            )
+            payload = experiment.skill_status(args.trial_id)
         elif args.command.startswith("experiment-"):
             from .artifacts import read_json
             from .experiments import Experiment

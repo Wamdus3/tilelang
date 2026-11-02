@@ -25,12 +25,12 @@ from .generation import (
 )
 from .runner import alive, process_identity, resume, run, stop_group
 from .skill_workflow import (
+    ASSURANCE,
     PROFILE,
     STAGES,
-    chunk_text,
-    make_manifest,
     parse_stage_response,
     profile_for,
+    verify_workflow_sources,
     workflow_context,
 )
 from .store import Campaign, new_id
@@ -90,8 +90,7 @@ def normalize_spec(value, repo_root):
             "skill_workflow": profile_for(arm, value["evaluation_mode"]),
         }
         if arms[name]["skill_workflow"] == PROFILE:
-            for stage in STAGES:
-                make_manifest(repo_root, arms[name]["skill_links"], stage)
+            verify_workflow_sources(repo_root, arms[name]["skill_links"])
     budget = fields(value["budget"], {"generations", "reserved_tokens", "evaluations", "wall_seconds"}, "budget")
     for key in ("generations", "reserved_tokens", "evaluations"):
         integer(budget[key], key)
@@ -157,9 +156,6 @@ class Experiment:
                     replica INTEGER NOT NULL, round INTEGER NOT NULL, parent TEXT UNIQUE, root_id TEXT NOT NULL,
                     state TEXT NOT NULL, context_ref TEXT, response_ref TEXT, process_ref TEXT, execution_ref TEXT,
                     candidate_id TEXT, attempt_id TEXT, result_ref TEXT, workflow_ref TEXT);
-                CREATE TABLE skill_reads (trial_id TEXT NOT NULL, request_id TEXT NOT NULL,
-                    chunk_id TEXT NOT NULL, delivery_ref TEXT NOT NULL,
-                    PRIMARY KEY(trial_id, request_id, chunk_id));
                 CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, trial_id TEXT,
                     kind TEXT NOT NULL, payload_ref TEXT NOT NULL, created REAL NOT NULL);
             """)
@@ -236,58 +232,18 @@ class Experiment:
             work /= STAGES[len(self.workflow(trial)["steps"])]
         return work
 
-    def read_skill(self, trial_id, chunk_id):
-        """Deliver one bounded original excerpt and persist its delivery identity."""
-        trial = next((row for row in self.trials() if row["trial_id"] == trial_id), None)
-        if trial is None or trial["state"] not in ("WAITING_RESPONSE", "GENERATING") or not self.staged(trial):
-            raise ContractError("skill-read requires an active staged request")
-        context = self.objects.json(trial["context_ref"])
-        workflow = context["skill_workflow"]
-        chunk = next((item for item in workflow["chunks"] if item["chunk_id"] == chunk_id), None)
-        if chunk is None:
-            raise ContractError("chunk is not required by this stage")
-        excerpt = chunk_text(Path(context["repository_root"]), chunk)
-        delivery = {
-            "request_id": workflow["request_id"],
-            "chunk": chunk,
-            "content": excerpt,
-            "scope": "bounded_tool_delivery; receiver must re-read truncated returns",
-        }
-        ref = self.objects.put_json(delivery)
-        with self.db() as db:
-            current = db.execute("SELECT context_ref,state FROM trials WHERE trial_id=?", (trial_id,)).fetchone()
-            if current["context_ref"] != trial["context_ref"] or current["state"] not in (
-                "WAITING_RESPONSE",
-                "GENERATING",
-            ):
-                raise ContractError("skill request advanced during reading")
-            db.execute(
-                "INSERT OR IGNORE INTO skill_reads VALUES (?,?,?,?)", (trial_id, workflow["request_id"], chunk_id, ref)
-            )
-        return {**delivery, "delivery_id": ref}
-
     def skill_status(self, trial_id):
         trial = next((row for row in self.trials() if row["trial_id"] == trial_id), None)
         if trial is None or trial["state"] not in ("WAITING_RESPONSE", "GENERATING") or not self.staged(trial):
             raise ContractError("skill-status requires an active staged request")
         workflow = self.objects.json(trial["context_ref"])["skill_workflow"]
-        with self.db() as db:
-            rows = db.execute(
-                "SELECT chunk_id,delivery_ref FROM skill_reads WHERE trial_id=? AND request_id=?",
-                (trial_id, workflow["request_id"]),
-            ).fetchall()
-        for row in rows:
-            self.objects.get(row["delivery_ref"])
-        delivered = {row["chunk_id"] for row in rows}
-        pending = [chunk for chunk in workflow["chunks"] if chunk["chunk_id"] not in delivered]
         return {
             "stage": workflow["stage"],
             "request_id": workflow["request_id"],
             "request_directory": str(self.request_work(trial)),
-            "required_chunks": len(workflow["chunks"]),
-            "delivered_chunks": len(delivered),
-            "next_chunk": pending[0] if pending else None,
+            "kernel_structure": workflow["kernel_structure"],
             "required_checks": workflow["required_checks"],
+            "required_citation_sources": workflow["required_citation_sources"],
             "stage_deliverable": workflow["stage_deliverable"],
             "assurance": workflow["assurance"],
         }
@@ -534,18 +490,9 @@ class Experiment:
     def collect_stage(self, trial, work, generator):
         context = self.objects.json(trial["context_ref"])
         workflow = context["skill_workflow"]
-        with self.db() as db:
-            reads = db.execute(
-                "SELECT chunk_id,delivery_ref FROM skill_reads WHERE trial_id=? AND request_id=?",
-                (trial["trial_id"], workflow["request_id"]),
-            ).fetchall()
-        deliveries = {row["chunk_id"]: row["delivery_ref"] for row in reads}
-        for ref in deliveries.values():
-            self.objects.get(ref)
         response = parse_stage_response(
             work / "response.json",
             context,
-            deliveries,
             Path(context["repository_root"]),
             generator["token_reservation"],
             self.lowering_files(trial),
@@ -561,7 +508,6 @@ class Experiment:
                 "context_ref": trial["context_ref"],
                 "response_ref": current["response_ref"],
                 "execution_ref": current["execution_ref"],
-                "deliveries": deliveries,
                 "assurance": workflow["assurance"],
             }
         )
@@ -583,7 +529,7 @@ class Experiment:
         progress = self.workflow(trial)
         campaign = Campaign(self.root / "campaigns" / trial["task_id"])
         for step in progress["steps"]:
-            refs = [step["context_ref"], step["response_ref"], *step["deliveries"].values()]
+            refs = [step["context_ref"], step["response_ref"]]
             if step["execution_ref"]:
                 refs.append(step["execution_ref"])
                 refs.extend(self.objects.json(step["execution_ref"]).values())
@@ -597,7 +543,7 @@ class Experiment:
                 "skill_workflow": {
                     "status": "CONTRACT_CHECKED",
                     "profile": PROFILE,
-                    "assurance": "bounded_delivery_and_agent_reported_evidence; not semantic or hardware proof",
+                    "assurance": ASSURANCE,
                     "device_readiness": "AGENT_REPORTED_REQUIRES_EXPLICIT_AUTHORIZATION",
                 },
             },
@@ -764,8 +710,6 @@ class Experiment:
                 for step in progress["steps"]:
                     self.objects.get(step["context_ref"])
                     step["reported_usage"] = self.objects.json(step["response_ref"])["usage"]
-                    for ref in step["deliveries"].values():
-                        self.objects.get(ref)
                     if step["execution_ref"]:
                         logs = self.objects.json(step["execution_ref"])
                         for ref in logs.values():
@@ -791,18 +735,6 @@ class Experiment:
                 terminal_ref = item["generation_logs"].get("termination.json")
                 if terminal_ref:
                     item["generation_termination"] = self.objects.json(terminal_ref)
-            if self.staged(trial):
-                with self.db() as db:
-                    deliveries = [
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT request_id,chunk_id,delivery_ref FROM skill_reads WHERE trial_id=? ORDER BY request_id,chunk_id",
-                            (trial["trial_id"],),
-                        )
-                    ]
-                for delivery in deliveries:
-                    self.objects.get(delivery["delivery_ref"])
-                item["skill_deliveries"] = deliveries
             rows.append(item)
         campaigns = {name: Campaign(self.root / "campaigns" / name).report() for name in spec["tasks"]}
         compiler_packs = {

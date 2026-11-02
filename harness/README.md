@@ -1,6 +1,6 @@
 # TileLang Harness
 
-用于 TileLang 算子生成、独立评测和可重放实验的确定性框架。当前版本为 **0.5.0**，优先支持 Ascend。
+用于 TileLang 算子生成、独立评测和可重放实验的确定性框架。当前版本为 **0.6.0**，优先支持 Ascend。
 控制器负责状态、预算和证据，外部 agent runtime 提交计划和源码；不需要常驻统筹 agent。
 
 ## 文档入口
@@ -87,13 +87,17 @@ Ascend lower 路线链接原 [tilelang-ascend](../.agents/skills/tilelang-ascend
 design → implementation → P1 全 case lowering → lowering_audit → validation
 ```
 
-`skill-status` 定位下一块，`skill-read` 每次交付最多 40 行/2400 字节原文。
-每步提交引用与带 SHA256、行号的证据；lowering 审计逐 case 引用本次 CAS 中的 TIR/ASC。
+分块指算子计算的 tile 与阶段：`T.macro` 封装有意义的生产者/消费者阶段，PrimFunc 管理存储和
+外层 tile 遍历；在选定 VF 内明确 `T.Parallel` 的索引映射、尾块和 mask，显式 SIMD 路线说明 lane/predicate。
+设计与实现阶段提交 `tile_decomposition` 检查，实现检查必须引用候选 Python 源码。
+`skill-status` 显示当前阶段、计算组织要求和必需检查；原 Skill 按任务直接读取，引用文件路径、SHA256 和行号。
+lowering 审计逐 case 引用本次 CAS 中的 TIR/ASC。
 源码冻结时同时登记设备门禁，四阶段完成前不能预留该 trial 的设备作业。
 每个阶段分别计入 generation/token；四步仍是一个独立试验，修复保留父子关系。
 
 `CONTRACT_CHECKED` 仅表示交付、来源与结构检查通过，不能证明模型理解充分或技术结论正确。
-显式 `skill_workflow: "links"` 保留只给链接的协议，适用于消融和旧接线检查。
+默认合同为 `ascend-kernel-v2`；显式 `skill_workflow: "links"` 保留只给链接的消融协议。
+使用当前 runtime 与 Skill 快照新建实验以应用本合同。
 
 ## 验证和保证范围
 

@@ -18,7 +18,7 @@
         "parameters": {"temperature": 0.2}, "timeout_s": 300, "token_reservation": 32768
       },
       "skill_links": [".agents/skills/tilelang-ascend/SKILL.md"],
-      "skill_workflow": "ascend-kernel-v1"
+      "skill_workflow": "ascend-kernel-v2"
     }
   ],
   "replicates": 1,

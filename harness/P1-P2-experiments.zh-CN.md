@@ -16,21 +16,28 @@
 生成器应按任务读取这些原始文件。运行前及生成返回后检测引用漂移；发生漂移时停止，要求新建实验。
 因此历史实验的指导文件需要由对应仓库版本保留；不能只靠修改后的同名路径重放旧上下文。
 
-### 分阶段利用原 Skill（0.5.0）
+### 分阶段利用原 Skill（0.6.0）
 
-新建 `lower` 实验且 arm 链接原 Ascend `SKILL.md` 时，默认启用 `skill_workflow: "ascend-kernel-v1"`。
-原文件和引用闭包仍保持路径与哈希，不修改或另写算子指导。控制器按原文标题分配阅读范围，
-每次 `skill-read` 只返回最多 40 行、2400 UTF-8 字节的原文，并在 SQLite/CAS 记录交付身份。
-标题缺失、引用漂移或缺少结构/同步/测量参考会拒绝推进。不会把“计算文件哈希”计为 agent 阅读。
+新建 `lower` 实验且 arm 链接原 Ascend `SKILL.md` 时，默认启用 `skill_workflow: "ascend-kernel-v2"`。
+原文件和引用闭包保持路径与哈希，生成器按任务直接读取原指导并引用相关行；
+引用漂移或缺少结构/同步/测量参考会拒绝推进。
+
+这里要求的分块是 **kernel 计算分块**，遵循原 Skill 的 kernel-structure 与 VF 选择规则：
+
+- 编译期确定 tiling 参数，`T.macro` 组织有意义的阶段，明确输入/输出 buffer、布局、精度和 core/PIPE。
+- PrimFunc 管理分配、layout/version annotation 和外层 tile 遍历；区分循环携带状态与每 tile scratch。
+- 明确 tile 维度、索引/轴映射、尾块和 mask；按阶段选择 SIMD/SIMT，说明 VF 内 `T.Parallel` 的工作映射。
+  使用显式 `T.simd.*` 时给出 lane/predicate 依据；简单单阶段可内联，但需要说明范围理由。
+- 宏只组织源码，跨 tile 的流水由 caller loop 建立，并以本次实际 lowering 审计存储、依赖和同步。
 
 ```text
 design → implementation → P1 全 case lowering → lowering_audit → validation → 终态
 ```
 
-| 阶段 | 使用原 Skill 的范围 | 必需的可检查交付物 |
+| 阶段 | 相关原 Skill | 必需的可检查交付物 |
 | --- | --- | --- |
-| design | 主技能工作流、kernel-structure、自动 pipeline 四步 | stage/core/PIPE/VF 表；含 padding、alias、转换 scratch、版本的物理预算；pipeline 上界与替代路线理由 |
-| implementation | 主技能 API、结构/同步、build 和编译工具引用 | `solution.py`；选用 API 的 dtype/scope/地址对齐契约；初始化、读写跨度、owner 和 pipeline 依据 |
+| design | 主技能工作流、kernel-structure、自动 pipeline 四步 | `tile_decomposition`：macro 阶段、producer/consumer、tile/VF 并行映射、尾块/mask；stage/core/PIPE/VF 表；物理预算、pipeline 上界与替代路线理由 |
+| implementation | 主技能 API、结构/同步；build/编译工具按需 | `solution.py`；`tile_decomposition` 引用实际候选 Python 源码；API 的 dtype/scope/对齐、初始化、读写跨度、owner 和 pipeline 依据 |
 | lowering_audit | 工作流、pitfalls、同步与编译参考 | 对每个固定 case 审计实际存储、版本/epoch、ready/reuse、地址/跨度和 schedule；绑定本次 CAS 中的 lowered TIR/ASC |
 | validation | 性能章节和 profiling | lower/vendor/device/performance 分层状态；覆盖、计时边界和次数；尚未完成的硬件验证与授权限制 |
 
@@ -38,40 +45,39 @@ design → implementation → P1 全 case lowering → lowering_audit → valida
 负责当前阶段，无需新增 Supervisor。前面阶段的文件在 `prior/<stage>/` 中，后两个阶段另有
 `lowering/<case-id>/` 的准确产物副本；原始响应与产物哈希在 CAS 中保持不可变。
 
-拿到 `WAITING_RESPONSE` 后，先读取该阶段 `context.md`，再按以下方式逐块读取：
+拿到 `WAITING_RESPONSE` 后，读取该阶段 `context.md` 和原 Skill 的适用内容。可用以下命令查看当前合同：
 
 ```bash
 $PY -m tilelang_harness skill-status --run-dir output/generation-study --trial-id "$TRIAL_ID"
-# 将 next_chunk.chunk_id 赋给 CHUNK；每个工具返回只执行一次 skill-read：
-$PY -m tilelang_harness skill-read --run-dir output/generation-study --trial-id "$TRIAL_ID" --chunk "$CHUNK"
 ```
 
-保存每次返回的 `delivery_id`；如工具返回被截断，单独重读该块后再确认。`skill-status` 只返回
-下一块和进度，避免为了找到未读部分而再次输出整份上下文。不能合并几十次读取到一个大输出。
+`skill-status` 返回阶段、计算组织要求、必需检查和引用来源。
 
 响应格式以本次 `context.json.response_contract` 为准；四阶段响应还需要 `stage`、`request_id`、
-`reads` 和 `checks`。每项 check 提供具体决定/偏离理由、原文短引用和证据的文件路径、SHA256、行号。
+`checks`。每项 check 提供具体决定/偏离理由、原文短引用和证据的文件路径、SHA256、行号。
+原文 citation 为 `{"path":"仓库相对路径","sha256":"skill_links 中的文件哈希","start_line":1,"end_line":1,"quote":"对应行的原文短引"}`。
+哈希绑定整份原文件，引用行号定位所用规则，无需先经 harness 交付该段文字。
 引用必须来自该项指定的参考文件；lower 审计必须覆盖每个 case 并引用其本次 `lowered.tir` 或
 `kernel.cpp`，不能只提交一段泛泛说明、引用 input TIR、拿别的 case 或旧编译产物替代。
-`NOT_APPLICABLE` 仍需具体范围理由及证据；`BLOCKED`/缺读/缺项/哈希错误均不能进入下一步。
+`NOT_APPLICABLE` 仍需具体范围理由及证据；`BLOCKED`/缺项/引用或证据错误均不能进入下一步。
 实现阶段 API 契约应在 P1 lowering 前核实，不能等 vendor 编译后才补地址对齐审计。
 
 每个阶段请求分别预留一次 generation 和 token，第一轮最低 4 次；lowering 只计一次 evaluation。
 修复是一个新的 trial，重新走完整流程，不能用旧源码的审计为修复后源码背书。
-报告保留每阶段 token/日志/原始响应和失败读取记录，不将四阶段计为四个独立算子样本。
+报告保留每阶段 token/日志/原始响应与源码/产物证据，不将四阶段计为四个独立算子样本。
 budget 不足时拒绝初始化或记录耗尽，恢复不会重新请求已经提交的阶段。
 
 实现源码冻结时，同一 SQLite 事务登记设备门禁；四阶段完成之前，相关 campaign 的设备作业
 在资源预留前被拒绝。完成后仍要求显式 trial 关联、设备额度和单 case 命令，**不会自动执行
 vendor 编译或 NPU 测试**。该门禁只约束 harness 管理的作业，不能限制外部脚本自行调用 SDK。
 
-这建立的是**小块交付、明确确认、引用/证据来源与步骤顺序**，不能证明模型理解了原文，
+这建立的是**计算分块合同、原文引用、源码/产物证据与步骤顺序**，不能证明模型理解了原文，
 也不自动判定技术解释正确。报告称为 `CONTRACT_CHECKED` 和 agent-reported evidence；
 不能把这一状态当成 vendor/device/performance PASS，仍需技术审查和相应层级的实际验证。
 
 需要复现实验旧协议或单独做“只给链接”的消融时，显式设置 `skill_workflow: "links"`；
 不提供 skill 的 arm 仍使用原协议。它们不会被报告成完成四步 skill 流程。
-旧实验保留原冻结 runtime，不通过替换当前源码续写历史成绩；本次变更需新建实验。
+本合同使用当前 runtime 与 Skill 快照新建实验，不通过替换源码续写历史成绩。
 
 ## 最小使用流程
 

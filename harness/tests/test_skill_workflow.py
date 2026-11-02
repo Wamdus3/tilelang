@@ -1,4 +1,4 @@
-"""Skill delivery/provenance fixtures, never model benchmarks or NPU tests."""
+"""Kernel-generation contract fixtures, never model benchmarks or NPU tests."""
 
 import copy
 import os
@@ -11,7 +11,7 @@ from tilelang_harness.artifacts import digest, read_json, write_json
 from tilelang_harness.contracts import ContractError
 from tilelang_harness.experiments import Experiment
 from tilelang_harness.generation import skill_links
-from tilelang_harness.skill_workflow import ASCEND_SKILL, MAX_CHUNK_BYTES, STAGES, make_manifest
+from tilelang_harness.skill_workflow import ASCEND_SKILL, PROFILE, STAGES, STRUCTURE
 from tilelang_harness.store import Campaign
 
 
@@ -27,7 +27,9 @@ def skill_fixture(root):
     )
     references = main.parent / "references"
     references.mkdir()
-    (references / "kernel-structure.md").write_text("# Structure\nChoose a VF for each stage.\n")
+    (references / "kernel-structure.md").write_text(
+        "# Structure\nUse meaningful T.macro stages; map tile elements with T.Parallel in the selected VF.\n"
+    )
     (references / "synchronization.md").write_text(
         "# Synchronization\n### Establish an automatic tiled pipeline\nClassify and budget storage.\n"
         "### Tune performance\nInspect versions and read footprints.\n"
@@ -95,16 +97,16 @@ def create(tmp_path, monkeypatch):
     return experiment
 
 
-def proposal(experiment, waiting):
+def proposal(experiment, waiting, implementation_source=None):
     context = read_json(Path(waiting["request_directory"]) / "context.json")
     flow = context["skill_workflow"]
-    reads = []
-    for chunk in flow["chunks"]:
-        delivery = experiment.read_skill(waiting["trial_id"], chunk["chunk_id"])
-        reads.append({"chunk_id": chunk["chunk_id"], "delivery_id": delivery["delivery_id"]})
     files = {"notes.md": "Protocol fixture evidence, not a technical kernel audit.\n"}
     if flow["stage"] == "implementation":
-        files["solution.py"] = "def build(N):\n    raise RuntimeError('fixture, never executed')\n"
+        files["solution.py"] = (
+            "def build(N):\n    raise RuntimeError('fixture, never executed')\n"
+            if implementation_source is None
+            else implementation_source
+        )
     checks = []
     cases = flow["case_ids"] if flow["stage"] == "lowering_audit" else [None]
     for case in cases:
@@ -118,9 +120,14 @@ def proposal(experiment, waiting):
             name = f"lowering/{case}/lowered.tir"
             evidence.update(path=name, sha256=flow["lowering_artifacts"][name])
         for check in flow["required_checks"]:
-            chunk = next(item for item in flow["chunks"] if item["path"] in flow["required_citation_sources"][check])
-            original = experiment.read_skill(waiting["trial_id"], chunk["chunk_id"])
-            citation = {"chunk_id": chunk["chunk_id"], "quote": original["content"].splitlines()[0]}
+            source = next(
+                item for item in context["skill_links"] if item["path"] in flow["required_citation_sources"][check]
+            )
+            original = (Path(context["repository_root"]) / source["path"]).read_text()
+            citation = {**source, "start_line": 1, "end_line": 1, "quote": original.splitlines()[0]}
+            check_evidence = copy.deepcopy(evidence)
+            if flow["stage"] == "implementation" and check == "tile_decomposition":
+                check_evidence.update(path="files/solution.py", sha256=digest(files["solution.py"].encode()))
             checks.append(
                 {
                     "id": check,
@@ -128,14 +135,13 @@ def proposal(experiment, waiting):
                     "status": "PASS",
                     "reason": "Protocol fixture only.",
                     "citations": [citation],
-                    "evidence": [copy.deepcopy(evidence)],
+                    "evidence": [check_evidence],
                 }
             )
     return {
         "schema_version": 1,
         "stage": flow["stage"],
         "request_id": flow["request_id"],
-        "reads": reads,
         "checks": checks,
         "files": files,
         "config": {},
@@ -161,25 +167,20 @@ def test_default_profile_reserves_all_four_requests(tmp_path):
         Experiment.create(tmp_path / "bad", value, tmp_path)
 
 
-def test_original_chunks_are_bounded_and_no_closure_file_is_lost(tmp_path):
+def test_guidance_links_do_not_depend_on_headings_or_line_size(tmp_path):
     skill_fixture(tmp_path)
-    links = skill_links(tmp_path, [ASCEND_SKILL])
-    routed = set()
-    for stage in STAGES:
-        for chunk in make_manifest(tmp_path, links, stage):
-            routed.add(chunk["path"])
-            lines = (tmp_path / chunk["path"]).read_text().splitlines(keepends=True)
-            data = "".join(lines[chunk["start_line"] - 1 : chunk["end_line"]]).encode()
-            assert digest(data) == chunk["sha256"]
-            assert len(data) <= MAX_CHUNK_BYTES
-    assert routed == {link["path"] for link in links}
+    main = tmp_path / ASCEND_SKILL
+    main.write_text(main.read_text().replace("## 10. Common Pitfalls", "## Renamed section") + "x" * 3000 + "\n")
+    experiment = Experiment.create(tmp_path / "run", specification(), tmp_path)
+    assert experiment.spec()["arms"]["fixture"]["skill_workflow"] == PROFILE
+    assert experiment.spec()["arms"]["fixture"]["skill_links"] == skill_links(tmp_path, [ASCEND_SKILL])
 
 
-def test_missing_skill_section_rejected_before_experiment_creation(tmp_path):
+def test_missing_kernel_structure_reference_rejected_before_experiment_creation(tmp_path):
     skill_fixture(tmp_path)
     path = tmp_path / ASCEND_SKILL
-    path.write_text(path.read_text().replace("## 10. Common Pitfalls", "## Renamed section"))
-    with pytest.raises(ContractError, match="anchor missing"):
+    path.write_text(path.read_text().replace("[structure](references/kernel-structure.md)\n", ""))
+    with pytest.raises(ContractError, match="missing required linked references"):
         Experiment.create(tmp_path / "run", specification(), tmp_path)
     assert not (tmp_path / "run").exists()
 
@@ -213,9 +214,9 @@ def test_four_steps_and_recovery_preserve_all_evidence(tmp_path, monkeypatch):
     assert len(report["trials"][0]["skill_workflow"]["steps"]) == 4
     assert report["campaigns"][experiment.trials()[0]["task_id"]]["skill_gates"][0]["evidence_ref"]
     assert experiment.run()["usage"] == report["usage"]
-    # A historical stage's receipts, not just the final response, remain checked.
+    # Historical stage evidence, not just the final response, remains checked.
     step = report["trials"][0]["skill_workflow"]["steps"][0]
-    experiment.objects.path(next(iter(step["deliveries"].values()))).write_bytes(b"corrupt")
+    experiment.objects.path(step["context_ref"]).write_bytes(b"corrupt")
     with pytest.raises(ContractError, match="corruption"):
         experiment.report()
 
@@ -224,8 +225,12 @@ def test_four_steps_and_recovery_preserve_all_evidence(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "mutation",
     [
-        "missing_read",
-        "fake_delivery",
+        "fake_source_hash",
+        "foreign_source",
+        "bad_citation_line",
+        "quote_outside_lines",
+        "unrelated_source",
+        "missing_tile_decomposition",
         "missing_check",
         "fake_quote",
         "stale_request",
@@ -240,10 +245,19 @@ def test_bad_design_cannot_reach_evaluation(tmp_path, monkeypatch, mutation):
     experiment = create(tmp_path, monkeypatch)
     waiting = experiment.run()
     value = proposal(experiment, waiting)
-    if mutation == "missing_read":
-        value["reads"].pop()
-    elif mutation == "fake_delivery":
-        value["reads"][0]["delivery_id"] = "0" * 64
+    if mutation == "fake_source_hash":
+        value["checks"][0]["citations"][0]["sha256"] = "0" * 64
+    elif mutation == "foreign_source":
+        value["checks"][0]["citations"][0]["path"] = "outside.md"
+    elif mutation == "bad_citation_line":
+        value["checks"][0]["citations"][0]["end_line"] = 1000
+    elif mutation == "quote_outside_lines":
+        value["checks"][0]["citations"][0]["quote"] = "Design original storage guidance."
+    elif mutation == "unrelated_source":
+        check = next(item for item in value["checks"] if item["id"] == "physical_storage_budget")
+        check["citations"] = copy.deepcopy(value["checks"][0]["citations"])
+    elif mutation == "missing_tile_decomposition":
+        value["checks"] = [item for item in value["checks"] if item["id"] != "tile_decomposition"]
     elif mutation == "missing_check":
         value["checks"].pop()
     elif mutation == "fake_quote":
@@ -266,15 +280,34 @@ def test_bad_design_cannot_reach_evaluation(tmp_path, monkeypatch, mutation):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="WSL controller lock required")
-def test_reading_directly_is_not_a_framework_delivery(tmp_path, monkeypatch):
+def test_source_citations_advance_with_kernel_contract_checks(tmp_path, monkeypatch):
     experiment = create(tmp_path, monkeypatch)
     waiting = experiment.run()
     value = proposal(experiment, waiting)
-    with experiment.db() as db:
-        db.execute("DELETE FROM skill_reads")
+    context = read_json(Path(waiting["request_directory"]) / "context.json")
+    assert "tile_decomposition" in context["skill_workflow"]["required_checks"]
+    next_stage = submit(experiment, waiting, value)
+    assert next_stage["skill_stage"] == "implementation"
+    assert experiment.settings()["evaluations"] == 0
+
+
+@pytest.mark.skipif(os.name != "posix", reason="WSL controller lock required")
+@pytest.mark.parametrize("mutation", ["missing", "notes_only", "wrong_source_hash"])
+def test_tile_decomposition_requires_implementation_source_before_lowering(tmp_path, monkeypatch, mutation):
+    experiment = create(tmp_path, monkeypatch)
+    waiting = experiment.run()
+    waiting = submit(experiment, waiting, proposal(experiment, waiting))
+    value = proposal(experiment, waiting)
+    check = next(item for item in value["checks"] if item["id"] == "tile_decomposition")
+    if mutation == "missing":
+        value["checks"].remove(check)
+    elif mutation == "notes_only":
+        check["evidence"][0].update(path="files/notes.md", sha256=digest(value["files"]["notes.md"].encode()))
+    else:
+        check["evidence"][0]["sha256"] = "0" * 64
     report = submit(experiment, waiting, value)
     assert report["usage"]["evaluations"] == 0
-    assert "unverified skill delivery" in report["trials"][0]["result"]["error"]
+    assert report["trials"][0]["result"]["category"] == "INVALID_PROPOSAL"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="WSL controller lock required")
@@ -368,7 +401,7 @@ def test_explicit_links_ablation_keeps_legacy_response_protocol(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="WSL watchdog required")
-def test_command_runtime_can_read_stages_while_controller_is_waiting(tmp_path, monkeypatch):
+def test_command_runtime_submits_source_citations_without_read_calls(tmp_path, monkeypatch):
     experiment = create(tmp_path, monkeypatch)
     # Recreate a fresh experiment with a command fixture. Imports test helpers
     # solely to exercise protocol wiring, not to assess generation quality.
@@ -398,22 +431,21 @@ def test_command_runtime_can_read_stages_while_controller_is_waiting(tmp_path, m
 
 
 @pytest.mark.skipif(os.name != "posix", reason="WSL controller required")
-def test_skill_status_only_advances_after_bounded_delivery(tmp_path, monkeypatch, capsys):
+def test_skill_status_exposes_kernel_structure_and_checks(tmp_path, monkeypatch, capsys):
     from tilelang_harness.cli import main
 
     experiment = create(tmp_path, monkeypatch)
     waiting = experiment.run()
     args = ["--run-dir", str(experiment.root), "--trial-id", waiting["trial_id"]]
-    before = experiment.skill_status(waiting["trial_id"])
-    assert before["delivered_chunks"] == 0
-    assert main(["skill-read", *args, "--chunk", before["next_chunk"]["chunk_id"]]) == 0
-    delivered = __import__("json").loads(capsys.readouterr().out)
-    assert delivered["delivery_id"]
-    assert len(delivered["content"].encode("utf-8")) <= MAX_CHUNK_BYTES
     assert main(["skill-status", *args]) == 0
-    after = __import__("json").loads(capsys.readouterr().out)
-    assert after["delivered_chunks"] == 1
-    assert after["next_chunk"]["chunk_id"] != before["next_chunk"]["chunk_id"]
+    status = __import__("json").loads(capsys.readouterr().out)
+    assert status["stage"] == "design"
+    assert "tile_decomposition" in status["required_checks"]
+    assert STRUCTURE in status["required_citation_sources"]["tile_decomposition"]
+    assert "T.macro" in status["kernel_structure"]["macro_stages"]
+    assert "T.Parallel" in status["kernel_structure"]["tile_parallelism"]
+    guidance = (Path(waiting["request_directory"]) / "context.md").read_text()
+    assert "T.macro" in guidance and "T.Parallel" in guidance
 
 
 @pytest.mark.skipif(
@@ -430,11 +462,10 @@ def test_original_skill_with_real_lowering_artifact_handoff(tmp_path):
     value["budget"]["wall_seconds"] = 1200
     experiment = Experiment.create(tmp_path / "real-lower", value, repo)
     waiting = experiment.run()
+    source = source_path(load_task("vecadd").device_baseline).read_text()
     for stage in STAGES:
         assert waiting["skill_stage"] == stage
-        response = proposal(experiment, waiting)
-        if stage == "implementation":
-            response["files"]["solution.py"] = source_path(load_task("vecadd").device_baseline).read_text()
+        response = proposal(experiment, waiting, implementation_source=source)
         waiting = submit(experiment, waiting, response)
     assert waiting["trials"][0]["result"]["status"] == "PASS"
     task_id = experiment.trials()[0]["task_id"]

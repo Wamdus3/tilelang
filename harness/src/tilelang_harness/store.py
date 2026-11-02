@@ -295,8 +295,6 @@ class Campaign:
                 for step in evidence["steps"]:
                     for key in ("context_ref", "response_ref"):
                         self.objects.get(step[key])
-                    for ref in step["deliveries"].values():
-                        self.objects.get(ref)
         return {
             "schema_version": 1,
             "task_digest": task.task_digest,
