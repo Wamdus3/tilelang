@@ -260,6 +260,7 @@ markers = [
     "gpu: Mark a test as using a GPU",
     "multi_gpu: Mark a test as using multiple GPUs",
     "cuda: Mark a test as using CUDA",
+    "ascend: Mark a test as using Ascend",
     "llvm: Mark a test as using LLVM",
     "metal: Mark a test as using Metal",
     "rocm: Mark a test as using ROCm",

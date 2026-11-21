@@ -17,6 +17,7 @@ import tilelang.cache.binary_cache as binary_cache_mod
 import tilelang.cache.kernel_cache as kernel_cache_mod
 from tilelang.backend import create_backend_context
 from tilelang.cache.cuda_binary_cache import CUDABinaryCache
+from tilelang.cache.ascend_binary_cache import AscendBinaryCache
 from tilelang.cache.kernel_cache import KernelCache
 from tilelang.engine.param import KernelParam, dump_kernel_params
 from tilelang.env import env
@@ -246,20 +247,22 @@ def test_cuda_binary_cache_empty_read_raises(monkeypatch, tmp_path, missing_meta
     assert metadata_path.exists()
 
 
-def test_cuda_binary_cache_hash_mismatch_does_not_delete_entry(monkeypatch, tmp_path):
+@pytest.mark.parametrize("cache", [CUDABinaryCache, AscendBinaryCache], ids=["cuda", "ascend"])
+@pytest.mark.parametrize("damage", ["missing", "hash-mismatch"])
+def test_binary_cache_invalid_file_preserves_entry(monkeypatch, tmp_path, cache, damage):
     _set_cache_dirs(monkeypatch, tmp_path)
-
-    key = "mismatched-key"
-    CUDABinaryCache.save(key, "cubin", b"valid-cubin")
-    path = Path(CUDABinaryCache.get_write_path(key, "cubin"))
-    corrupted = b"other-cubin"
-    assert len(corrupted) == path.stat().st_size
-    path.write_bytes(corrupted)
-
-    with pytest.raises((OSError, ValueError)):
-        CUDABinaryCache.load(key, "cubin")
-    assert path.read_bytes() == corrupted
-    assert (path.parent / "metadata.json").exists()
+    binary_format = "aibin" if cache is AscendBinaryCache else "cubin"
+    cache.save("invalid-key", binary_format, b"valid-binary")
+    path = Path(cache.get_write_path("invalid-key", binary_format))
+    if damage == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b"other-binary")
+    before = {p.name: p.read_bytes() for p in path.parent.iterdir()}
+    error = FileNotFoundError if damage == "missing" else ValueError
+    with pytest.raises(error):
+        cache.load("invalid-key", binary_format)
+    assert {p.name: p.read_bytes() for p in path.parent.iterdir()} == before
 
 
 def test_cuda_binary_cache_rejects_truncated_binary(monkeypatch, tmp_path):
@@ -358,24 +361,26 @@ def test_cuda_binary_cache_concurrent_publishers_do_not_replace_winner(monkeypat
     assert not list(Path(CUDABinaryCache._get_staging_root()).iterdir())
 
 
-@pytest.mark.parametrize("operation", ["fsync", "rename"])
-def test_cuda_binary_cache_failed_publish_cleans_only_own_staging(monkeypatch, tmp_path, operation):
+@pytest.mark.parametrize("cache", [CUDABinaryCache, AscendBinaryCache], ids=["cuda", "ascend"])
+@pytest.mark.parametrize("operation, error", [("fsync", errno.EIO), ("rename", errno.EIO), ("rename", errno.EXDEV)])
+def test_binary_cache_failed_publish_cleans_only_own_staging(monkeypatch, tmp_path, cache, operation, error):
     _set_cache_dirs(monkeypatch, tmp_path)
 
-    staging_root = Path(CUDABinaryCache._get_staging_root())
+    binary_format = "aibin" if cache is AscendBinaryCache else "cubin"
+    staging_root = Path(cache._get_staging_root())
     other_writer = staging_root / "other-writer"
     other_writer.mkdir(parents=True)
     (other_writer / "kernel.cubin").write_bytes(b"other-cubin")
 
     def fail(*args, **kwargs):
-        raise OSError(errno.EIO, "injected I/O failure")
+        raise OSError(error, "injected I/O failure")
 
     monkeypatch.setattr(os, operation, fail)
     with pytest.raises(OSError, match="injected I/O failure"):
-        CUDABinaryCache.save("failed-publish-key", "cubin", b"valid-cubin")
+        cache.save("failed-publish-key", binary_format, b"valid-cubin")
 
-    assert CUDABinaryCache.load("failed-publish-key", "cubin") is None
-    assert not Path(CUDABinaryCache.get_write_path("failed-publish-key", "cubin")).parent.exists()
+    assert cache.load("failed-publish-key", binary_format) is None
+    assert not Path(cache.get_write_path("failed-publish-key", binary_format)).parent.exists()
     assert list(staging_root.iterdir()) == [other_writer]
     assert (other_writer / "kernel.cubin").read_bytes() == b"other-cubin"
 

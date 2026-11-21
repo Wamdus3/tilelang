@@ -45,20 +45,26 @@ def cache_dirs(tmp_path, monkeypatch):
     return cache_dir
 
 
+@pytest.fixture(params=[{"kind": "cuda", "arch": "sm_80"}, {"kind": "ascend", "arch": "dav-3510"}], ids=["cuda", "ascend"])
+def backend_context(request):
+    # Explicit architectures keep these loader-only tests independent of devices.
+    return create_backend_context(request.param, execution_backend="tvm_ffi")
+
+
 def _make_fake_kernel(tmp_path):
     lib_path = tmp_path / "kernel_lib.so"
     lib_path.write_bytes(b"fake-so-contents")
     return _FakeKernel(str(lib_path))
 
 
-def _load_expecting_no_build(cache: KernelCache, key: str, monkeypatch):
+def _load_expecting_no_build(cache: KernelCache, key: str, monkeypatch, backend_context):
     def fail_from_database(cls, **kwargs):
         raise AssertionError("corrupted cache entries must raise before rebuilding from database")
 
     monkeypatch.setattr(kernel_cache_mod.JITKernel, "from_database", classmethod(fail_from_database))
     return cache._load_kernel_from_disk(
         key,
-        backend_context=create_backend_context("cuda", execution_backend="tvm_ffi"),
+        backend_context=backend_context,
         out_idx=[0],
         pass_configs=None,
         compile_flags=None,
@@ -66,12 +72,12 @@ def _load_expecting_no_build(cache: KernelCache, key: str, monkeypatch):
     )
 
 
-def _load_expecting_hit(cache: KernelCache, key: str, monkeypatch):
+def _load_expecting_hit(cache: KernelCache, key: str, monkeypatch, backend_context):
     sentinel = object()
     monkeypatch.setattr(kernel_cache_mod.JITKernel, "from_database", classmethod(lambda cls, **kwargs: sentinel))
     loaded = cache._load_kernel_from_disk(
         key,
-        backend_context=create_backend_context("cuda", execution_backend="tvm_ffi"),
+        backend_context=backend_context,
         out_idx=[0],
         pass_configs=None,
         compile_flags=None,
@@ -100,21 +106,25 @@ def test_save_writes_manifest_covering_all_files(cache_dirs, tmp_path):
     assert manifest["files"][cache.kernel_lib_path]["sha256"] == sha256(lib_bytes).hexdigest()
 
 
-def test_load_preserves_entry_with_truncated_kernel_lib(cache_dirs, tmp_path, monkeypatch):
+@pytest.mark.parametrize("damage", ["missing", "truncated"])
+def test_load_preserves_entry_with_missing_or_truncated_kernel_lib(cache_dirs, tmp_path, monkeypatch, backend_context, damage):
     cache = KernelCache()
     key = "truncated-lib"
     cache._save_kernel_to_disk(key, _make_fake_kernel(tmp_path))
     cache_path = Path(cache._get_write_cache_path(key))
 
     lib_file = cache_path / cache.kernel_lib_path
-    lib_file.write_bytes(lib_file.read_bytes()[: len(b"fake-so-contents") // 2])
+    if damage == "missing":
+        lib_file.unlink()
+    else:
+        lib_file.write_bytes(lib_file.read_bytes()[: len(b"fake-so-contents") // 2])
 
     with pytest.raises(ValueError):
-        _load_expecting_no_build(cache, key, monkeypatch)
+        _load_expecting_no_build(cache, key, monkeypatch, backend_context)
     assert cache_path.exists()
 
 
-def test_load_preserves_entry_with_same_size_corruption(cache_dirs, tmp_path, monkeypatch):
+def test_load_preserves_entry_with_same_size_corruption(cache_dirs, tmp_path, monkeypatch, backend_context):
     cache = KernelCache()
     key = "bitflipped-lib"
     cache._save_kernel_to_disk(key, _make_fake_kernel(tmp_path))
@@ -125,11 +135,11 @@ def test_load_preserves_entry_with_same_size_corruption(cache_dirs, tmp_path, mo
     lib_file.write_bytes(b"\x00" * len(original))
 
     with pytest.raises(ValueError):
-        _load_expecting_no_build(cache, key, monkeypatch)
+        _load_expecting_no_build(cache, key, monkeypatch, backend_context)
     assert cache_path.exists()
 
 
-def test_source_files_are_size_checked_but_not_hashed(cache_dirs, tmp_path, monkeypatch):
+def test_source_files_are_size_checked_but_not_hashed(cache_dirs, tmp_path, monkeypatch, backend_context):
     # Hashing sources on load would regress lazy source loading; only their
     # size is checked, so a same-size rewrite of a source file must not
     # invalidate the entry.
@@ -141,10 +151,10 @@ def test_source_files_are_size_checked_but_not_hashed(cache_dirs, tmp_path, monk
     device_file = cache_path / cache.device_kernel_path
     device_file.write_text("X" * len(device_file.read_text()))
 
-    assert _load_expecting_hit(cache, key, monkeypatch)
+    assert _load_expecting_hit(cache, key, monkeypatch, backend_context)
 
 
-def test_legacy_entry_requires_whole_entry_removal(cache_dirs, tmp_path, monkeypatch):
+def test_legacy_entry_requires_whole_entry_removal(cache_dirs, tmp_path, monkeypatch, backend_context):
     cache = KernelCache()
     key = "legacy-no-manifest"
     cache_path = Path(cache._get_write_cache_path(key))
@@ -155,7 +165,7 @@ def test_legacy_entry_requires_whole_entry_removal(cache_dirs, tmp_path, monkeyp
     (cache_path / cache.params_path).write_text(dump_kernel_params([KernelParam(tvm.DataType("float32"), [4])]))
 
     with pytest.raises(ValueError):
-        _load_expecting_no_build(cache, key, monkeypatch)
+        _load_expecting_no_build(cache, key, monkeypatch, backend_context)
 
     cache._save_kernel_to_disk(key, _make_fake_kernel(tmp_path))
     assert not (cache_path / cache.manifest_path).exists()
@@ -165,11 +175,11 @@ def test_legacy_entry_requires_whole_entry_removal(cache_dirs, tmp_path, monkeyp
     cache._save_kernel_to_disk(key, _make_fake_kernel(tmp_path))
     assert (cache_path / cache.manifest_path).exists()
     assert (cache_path / cache.kernel_lib_path).read_bytes() == b"fake-so-contents"
-    assert _load_expecting_hit(cache, key, monkeypatch)
+    assert _load_expecting_hit(cache, key, monkeypatch, backend_context)
 
 
 @pytest.mark.parametrize("invalid", ["missing", "corrupt", "load_failure"])
-def test_kernel_cache_multiple_roots(tmp_path, monkeypatch, invalid):
+def test_kernel_cache_multiple_roots(tmp_path, monkeypatch, invalid, backend_context):
     import os
     from types import SimpleNamespace
     from tilelang.autotuner.tuner import AutoTuner
@@ -191,7 +201,7 @@ def test_kernel_cache_multiple_roots(tmp_path, monkeypatch, invalid):
         return SimpleNamespace(loaded_path=path)
 
     monkeypatch.setattr(kernel_cache_mod.JITKernel, "from_database", classmethod(build))
-    context = create_backend_context("cuda", execution_backend="tvm_ffi")
+    context = backend_context
     if invalid != "load_failure":
         assert cache._load_kernel_from_disk("key", context).loaded_path.is_relative_to(roots[0])
         for root in roots[:2]:

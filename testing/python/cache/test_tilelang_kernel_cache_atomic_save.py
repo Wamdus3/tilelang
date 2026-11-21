@@ -1,5 +1,6 @@
 import builtins
 import errno
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -302,7 +303,8 @@ def test_kernel_cache_preserves_incomplete_cache_dir(cache_dirs, tmp_path):
     assert (cache_path / "stale.txt").read_text() == "partial"
 
 
-def test_kernel_cache_logs_write_oserror_instead_of_treating_it_as_race(cache_dirs, tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation, error", [("write", errno.ENOSPC), ("publish", errno.EXDEV)])
+def test_kernel_cache_logs_write_oserror_instead_of_treating_it_as_race(cache_dirs, tmp_path, monkeypatch, operation, error):
     cache = KernelCache()
     key = "atomic-write-error"
     logged = []
@@ -310,12 +312,15 @@ def test_kernel_cache_logs_write_oserror_instead_of_treating_it_as_race(cache_di
     staging_root = Path(cache._get_staging_root())
 
     def raise_write_error(*args, **kwargs):
-        raise OSError(errno.ENOSPC, "No space left on device")
+        raise OSError(error, os.strerror(error))
 
     def record_exception(message, *args, **kwargs):
         logged.append(message)
 
-    monkeypatch.setattr(cache, "_save_so_cubin_to_disk", raise_write_error)
+    if operation == "write":
+        monkeypatch.setattr(cache, "_save_so_cubin_to_disk", raise_write_error)
+    else:
+        monkeypatch.setattr(os, "rename", raise_write_error)
     monkeypatch.setattr(cache.logger, "exception", record_exception)
 
     cache._save_kernel_to_disk(key, _make_fake_kernel(tmp_path))
